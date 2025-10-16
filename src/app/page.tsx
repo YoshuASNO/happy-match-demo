@@ -1,103 +1,173 @@
+"use client";
+
 import Image from "next/image";
+import Header from "../components/Header";
+import { supabase } from "../lib/supabaseClient";
+import { useRequireAuth } from "../hooks/useRequireAuth";
+
+import { useEffect, useState, useRef } from "react";
+
+// VAPID公開鍵（後でAPI Routeから取得する形にしてもOK）
+const VAPID_PUBLIC_KEY = "ここにVAPID公開鍵を入力";
 
 export default function Home() {
+  const [userName, setUserName] = useState<string>("");
+  const [authChecked, setAuthChecked] = useState(false);
+  const myLocationRef = useRef<{ lat: number; lng: number } | null>(null);
+
+  // Push通知購読処理
+  useEffect(() => {
+    if (typeof window === "undefined" || !('serviceWorker' in navigator)) return;
+    // サービスワーカー登録
+    navigator.serviceWorker.register('/sw.js').then(async (reg) => {
+      // すでに購読済みなら何もしない
+      const existing = await reg.pushManager.getSubscription();
+      if (existing) return;
+      // 通知許可
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') return;
+      // Push購読
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+      });
+      // Supabaseに購読情報を保存（API Route経由推奨、ここではconsole.log）
+      console.log('Push Subscription:', JSON.stringify(sub));
+      // TODO: Supabaseに保存する処理を追加
+    });
+    // VAPID鍵変換関数
+    function urlBase64ToUint8Array(base64String: string) {
+      const padding = '='.repeat((4 - base64String.length % 4) % 4);
+      const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+      const rawData = window.atob(base64);
+      const outputArray = new Uint8Array(rawData.length);
+      for (let i = 0; i < rawData.length; ++i) {
+        outputArray[i] = rawData.charCodeAt(i);
+      }
+      return outputArray;
+    }
+  }, []);
+
+  // Haversine距離計算関数
+  function getDistanceKm(lat1: number, lng1: number, lat2: number, lng2: number) {
+    const R = 6371; // 地球半径(km)
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLng = ((lng2 - lng1) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  }
+
+  // 現在地取得
+  useEffect(() => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition((pos) => {
+        myLocationRef.current = {
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+        };
+      });
+    }
+  }, []);
+
+  // Supabase Realtimeでmaydays監視
+  useEffect(() => {
+    const channel = supabase
+      .channel('maydays-realtime')
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'maydays',
+      }, (payload) => {
+        const { latitude, longitude } = payload.new;
+        const myLoc = myLocationRef.current;
+        if (myLoc) {
+          const dist = getDistanceKm(myLoc.lat, myLoc.lng, latitude, longitude);
+          if (dist <= 5) {
+            alert(`5km以内のMayday発生！距離: ${dist.toFixed(2)}km`);
+          }
+        }
+      })
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  useEffect(() => {
+    const fetchUserName = async () => {
+      const { data: authUser, error: authError } = await supabase.auth.getUser();
+      if (authUser?.user) {
+        const uuid = authUser.user.id;
+        // uuidでpublic.userテーブルからユーザー名取得
+          const { data, error } = await supabase
+            .from("users")
+            .select("name")
+            .eq("id", uuid)
+            .maybeSingle();
+          if (data && data.name) {
+            setUserName(data.name);
+          }
+      }
+      setAuthChecked(true);
+    };
+    fetchUserName();
+  }, []);
+
+  useRequireAuth(authChecked);
+
+  // 認証判定が終わるまで何も表示しない
+  if (!authChecked) {
+    return null;
+  }
+
   return (
     <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
       <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
-
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
-        </div>
+        {userName && (
+          <>
+            <div className="text-xl font-bold mb-8">ようこそ{userName}さん</div>
+            <button
+              className="bg-yellow-400 hover:bg-yellow-500 text-white font-bold py-6 px-10 rounded-full shadow-xl mb-8 text-2xl w-56 h-40 flex items-center justify-center"
+              onClick={async () => {
+                if (!navigator.geolocation) {
+                  alert("GPSが利用できません");
+                  return;
+                }
+                navigator.geolocation.getCurrentPosition(async (pos) => {
+                  const lat = pos.coords.latitude;
+                  const lng = pos.coords.longitude;
+                  // Supabase Authからuuid取得
+                  const { data: authUser } = await supabase.auth.getUser();
+                  const uuid = authUser?.user?.id;
+                  if (!uuid) {
+                    alert("ユーザーIDが取得できません");
+                    return;
+                  }
+                  // maydayテーブルにinsert
+                  const { error } = await supabase
+                    .from("maydays")
+                    .insert({ users_id: uuid, latitude: lat, longitude: lng });
+                  if (error) {
+                    alert("送信に失敗しました: " + error.message);
+                  } else {
+                    alert("位置情報を送信しました！");
+                  }
+                }, (err) => {
+                  alert("位置情報の取得に失敗しました: " + err.message);
+                });
+              }}
+            >
+              ピコーン！
+            </button>
+          </>
+        )}
       </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
     </div>
   );
 }
+
