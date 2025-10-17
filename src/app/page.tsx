@@ -132,6 +132,12 @@ export default function Home() {
             <button
               className="bg-yellow-400 hover:bg-yellow-500 text-white font-bold py-6 px-10 rounded-full shadow-xl mb-8 text-2xl w-56 h-40 flex items-center justify-center"
               onClick={async () => {
+                // 追加: 通知許可リクエスト
+                const permission = await Notification.requestPermission();
+                if (permission !== "granted") {
+                  alert("通知が許可されませんでした");
+                  return;
+                }
                 if (!navigator.geolocation) {
                   alert("GPSが利用できません");
                   return;
