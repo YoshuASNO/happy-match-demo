@@ -62,7 +62,7 @@ export default function Home() {
         // 既存購読でも必ずSupabaseに保存
         const { error } = await supabase
           .from("push_subscriptions")
-          .upsert([{ user_id: userId, subscription }]);
+          .upsert([{ user_id: userId, subscription }], { onConflict: 'user_id' });
         if (error) {
           alert("Push購読情報の保存に失敗しました: " + error.message);
         }
