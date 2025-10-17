@@ -8,7 +8,7 @@ import { useRequireAuth } from "../hooks/useRequireAuth";
 import { useEffect, useState, useRef } from "react";
 
 // VAPID公開鍵（後でAPI Routeから取得する形にしてもOK）
-const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY!;
+const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!;
 
 export default function Home() {
   const [userName, setUserName] = useState<string>("");
