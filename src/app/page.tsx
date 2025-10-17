@@ -8,7 +8,7 @@ import { useRequireAuth } from "../hooks/useRequireAuth";
 import { useEffect, useState, useRef } from "react";
 
 // VAPID公開鍵（後でAPI Routeから取得する形にしてもOK）
-const VAPID_PUBLIC_KEY = "ここにVAPID公開鍵を入力";
+const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY!;
 
 export default function Home() {
   const [userName, setUserName] = useState<string>("");
@@ -155,7 +155,7 @@ export default function Home() {
                   if (error) {
                     alert("送信に失敗しました: " + error.message);
                   } else {
-                    alert("位置情報を送信しました！");
+                    await sendPushToAll("Mayday!", "5km以内でMaydayが発生しました！");
                   }
                 }, (err) => {
                   alert("位置情報の取得に失敗しました: " + err.message);
@@ -171,3 +171,29 @@ export default function Home() {
   );
 }
 
+// 全ユーザーにWeb Push通知を送信する関数
+export async function sendPushToAll(title: string, body: string) {
+  // push_subscriptionsテーブルから全購読情報を取得
+  const { data, error } = await supabase
+    .from("push_subscriptions")
+    .select("subscription");
+
+  if (error) {
+    alert("購読情報の取得に失敗しました");
+    return;
+  }
+
+  if (data) {
+    for (const row of data) {
+      await fetch("/api/send-push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subscription: row.subscription,
+          title,
+          body,
+        }),
+      });
+    }
+  }
+}

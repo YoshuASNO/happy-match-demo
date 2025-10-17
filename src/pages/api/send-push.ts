@@ -2,11 +2,12 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import webpush from 'web-push';
 
 // VAPIDキー（本番は環境変数で管理）
-const VAPID_PUBLIC_KEY = 'ここにVAPID公開鍵を入力';
-const VAPID_PRIVATE_KEY = 'ここにVAPID秘密鍵を入力';
+const VAPID_CONTACT = process.env.VAPID_CONTACT!;
+const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY!;
+const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY!;
 
 webpush.setVapidDetails(
-  'mailto:your-email@example.com',
+  VAPID_CONTACT,
   VAPID_PUBLIC_KEY,
   VAPID_PRIVATE_KEY
 );
