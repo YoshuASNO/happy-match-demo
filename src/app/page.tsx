@@ -15,11 +15,14 @@ export default function Home() {
   const [authChecked, setAuthChecked] = useState(false);
   const myLocationRef = useRef<{ lat: number; lng: number } | null>(null);
 
-  // VAPID鍵のUint8Array変換
-  function convertVapidKey(base64: string) {
-    const pad = "=".repeat((4 - base64.length % 4) % 4);
-    const base64Str = (base64 + pad).replace(/-/g, "+").replace(/_/g, "/");
-    const raw = window.atob(base64Str);
+  // VAPID鍵のUint8Array変換（Base64URL形式のみ対応、iOS向け）
+  function convertVapidKey(base64url: string) {
+    // iOSではBase64URL形式のみサポート
+    // 末尾の=は不要、+や/は使わない
+    const base64 = base64url.replace(/-/g, "+").replace(/_/g, "/");
+    const pad = base64.length % 4 === 0 ? "" : "=".repeat(4 - (base64.length % 4));
+    const base64Padded = base64 + pad;
+    const raw = window.atob(base64Padded);
     return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
   }
 
@@ -41,31 +44,48 @@ export default function Home() {
   useEffect(() => {
     if (typeof window === "undefined" || !navigator.serviceWorker) return;
 
+
     async function subscribeAndRegister() {
-      const reg = await navigator.serviceWorker.register("/sw.js");
-      let subscription = await reg.pushManager.getSubscription();
+      try {
+        const reg = await navigator.serviceWorker.register("/sw.js");
+        let subscription = await reg.pushManager.getSubscription();
 
-      // 未購読なら新規購読
-      if (!subscription) {
-        const permission = await Notification.requestPermission();
-        if (permission !== "granted") return;
-        subscription = await reg.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: convertVapidKey(VAPID_PUBLIC_KEY),
-        });
-      }
-
-      // 認証ユーザーのID取得
-      const { data: userData } = await supabase.auth.getUser();
-      const userId = userData?.user?.id;
-      if (userId && subscription) {
-        // 既存購読でも必ずSupabaseに保存
-        const { error } = await supabase
-          .from("push_subscriptions")
-          .upsert([{ user_id: userId, subscription }], { onConflict: 'user_id' });
-        if (error) {
-          alert("Push購読情報の保存に失敗しました: " + error.message);
+        // 未購読なら新規購読
+        if (!subscription) {
+          const permission = await Notification.requestPermission();
+          if (permission !== "granted") {
+            alert("通知が許可されませんでした");
+            return;
+          }
+          try {
+            subscription = await reg.pushManager.subscribe({
+              userVisibleOnly: true,
+              applicationServerKey: convertVapidKey(VAPID_PUBLIC_KEY),
+            });
+          } catch (e) {
+            alert("PushManager.subscribe()失敗: " + (e instanceof Error ? e.message : String(e)));
+            return;
+          }
         }
+
+        // 認証ユーザーのID取得
+        const { data: userData, error: userError } = await supabase.auth.getUser();
+        if (userError) {
+          alert("ユーザー情報取得失敗: " + userError.message);
+          return;
+        }
+        const userId = userData?.user?.id;
+        if (userId && subscription) {
+          // 既存購読でも必ずSupabaseに保存
+          const { error } = await supabase
+            .from("push_subscriptions")
+            .upsert([{ user_id: userId, subscription }], { onConflict: 'user_id' });
+          if (error) {
+            alert("Push購読情報の保存に失敗しました: " + error.message);
+          }
+        }
+      } catch (e) {
+        alert("subscribeAndRegister全体で例外: " + (e instanceof Error ? e.message : String(e)));
       }
     }
 
