@@ -15,42 +15,17 @@ export default function Home() {
   const [authChecked, setAuthChecked] = useState(false);
   const myLocationRef = useRef<{ lat: number; lng: number } | null>(null);
 
-  // Push通知購読処理
-  useEffect(() => {
-    if (typeof window === "undefined" || !('serviceWorker' in navigator)) return;
-    // サービスワーカー登録
-    navigator.serviceWorker.register('/sw.js').then(async (reg) => {
-      // すでに購読済みなら何もしない
-      const existing = await reg.pushManager.getSubscription();
-      if (existing) return;
-      // 通知許可
-      const permission = await Notification.requestPermission();
-      if (permission !== 'granted') return;
-      // Push購読
-      const sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
-      });
-      // Supabaseに購読情報を保存（API Route経由推奨、ここではconsole.log）
-      console.log('Push Subscription:', JSON.stringify(sub));
-      // TODO: Supabaseに保存する処理を追加
-    });
-    // VAPID鍵変換関数
-    function urlBase64ToUint8Array(base64String: string) {
-      const padding = '='.repeat((4 - base64String.length % 4) % 4);
-      const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-      const rawData = window.atob(base64);
-      const outputArray = new Uint8Array(rawData.length);
-      for (let i = 0; i < rawData.length; ++i) {
-        outputArray[i] = rawData.charCodeAt(i);
-      }
-      return outputArray;
-    }
-  }, []);
+  // VAPID鍵のUint8Array変換
+  function convertVapidKey(base64: string) {
+    const pad = "=".repeat((4 - base64.length % 4) % 4);
+    const base64Str = (base64 + pad).replace(/-/g, "+").replace(/_/g, "/");
+    const raw = window.atob(base64Str);
+    return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+  }
 
   // Haversine距離計算関数
   function getDistanceKm(lat1: number, lng1: number, lat2: number, lng2: number) {
-    const R = 6371; // 地球半径(km)
+    const R = 6371;
     const dLat = ((lat2 - lat1) * Math.PI) / 180;
     const dLng = ((lng2 - lng1) * Math.PI) / 180;
     const a =
@@ -62,16 +37,39 @@ export default function Home() {
     return R * c;
   }
 
-  // 現在地取得
+ // Push通知の購読とSupabaseへの登録
   useEffect(() => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition((pos) => {
-        myLocationRef.current = {
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-        };
-      });
+    if (typeof window === "undefined" || !navigator.serviceWorker) return;
+
+    async function subscribeAndRegister() {
+      const reg = await navigator.serviceWorker.register("/sw.js");
+      let subscription = await reg.pushManager.getSubscription();
+
+      // 未購読なら新規購読
+      if (!subscription) {
+        const permission = await Notification.requestPermission();
+        if (permission !== "granted") return;
+        subscription = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: convertVapidKey(VAPID_PUBLIC_KEY),
+        });
+      }
+
+      // 認証ユーザーのID取得
+      const { data: userData } = await supabase.auth.getUser();
+      const userId = userData?.user?.id;
+      if (userId && subscription) {
+        // 既存購読でも必ずSupabaseに保存
+        const { error } = await supabase
+          .from("push_subscriptions")
+          .upsert([{ user_id: userId, subscription }]);
+        if (error) {
+          alert("Push購読情報の保存に失敗しました: " + error.message);
+        }
+      }
     }
+
+    subscribeAndRegister();
   }, []);
 
   // Supabase Realtimeでmaydays監視
