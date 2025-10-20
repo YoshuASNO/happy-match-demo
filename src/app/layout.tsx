@@ -28,6 +28,7 @@ export default function RootLayout({
       <head>
         <link rel="icon" type="image/x-icon" href="/favicon.ico" />
         <link rel="manifest" href="/manifest.json" />
+        <title>ハピマチ</title>
       </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
